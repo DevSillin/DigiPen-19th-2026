@@ -306,13 +306,11 @@ void updateAndDrawGameplay()
     popMatrix(); // 카메라 해제
     player.renderUI();
     
-    // --- [NEW] Stage Title UI Overlay ---
     if (stageManager.titleAlpha > 0)
     {
         textAlign(CENTER, CENTER);
         fill(0, stageManager.titleAlpha * 0.5);
         
-        // Main Text
         fill(255, stageManager.titleAlpha);
         textSize(80);
         String msg = (stageManager.stageNum == 4) ? "FINAL BOSS" : "STAGE " + stageManager.worldNum + "-" + stageManager.stageNum;
@@ -1321,7 +1319,7 @@ class Boss extends Enemy
         maxHp = 1500 * stageManager.worldNum;
         hp = maxHp;
         currentWeapon = WeaponType.NONE; // 일반 총을 쓰지 않고 고유 패턴만 씁니다.
-        attackRange = 3000.0; // 맵 어디에 있든 공격이 닿습니다.
+        this.attackRange = 3000.0; // 맵 어디에 있든 공격이 닿습니다.
     }
 
     // --- 보스 AI 메인 루프 (오버라이딩) ---
