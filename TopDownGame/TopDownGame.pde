@@ -6,7 +6,7 @@ enum GameState { TITLE, PLAYING, SETTINGS, STAGE_CLEAR, GAME_OVER } // 메인 �
 enum CharacterState { IDLE, MOVE, ROLL, ATTACK, RELOAD } // 대기, 이동, 구르기, 공격, 재장전
 
 // 게임에 존재하는 무기의 종류입니다.
-enum WeaponType { NONE, PISTOL, ASSAULT_RIFLE, SHOTGUN, SNIPER } // 맨손, 권총, 돌격소총, 샷건, 저격총
+enum WeaponType { NONE, PISTOL, ASSAULT_RIFLE, SHOTGUN, SNIPER, BOSS_CANNON } // 맨손, 권총, 돌격소총, 샷건, 저격총
 
 // 보스 몬스터가 사용하는 공격 패턴의 종류입니다.
 enum BossPattern { CIRCLE, RAPID, GRENADE } // 원형 탄막, 고속 기관총, 수류탄 투척
@@ -1163,7 +1163,18 @@ class Enemy extends Sprite
         
         // --- [NEW] Dynamic Attack Range based on Weapon Type ---
         // Snipers have a much longer engagement range (800px) compared to others (350px)
-        attackRange = (currentWeapon == WeaponType.SNIPER) ? 800.0 : 350.0;
+        attackRange = (currentWeapon == WeaponType.SNIPER) ? 800.0 : 350.0;if (currentWeapon == WeaponType.SNIPER) 
+        {
+            attackRange = 800.0;
+        }
+        else if (currentWeapon == WeaponType.BOSS_CANNON) 
+        {
+            attackRange = 3000.0; // Boss now has map-wide detection
+        }
+        else 
+        {
+            attackRange = 350.0;
+        }
         
         // If out of attack range, move toward the target
         if (d > attackRange) 
@@ -1312,42 +1323,34 @@ class Boss extends Enemy
 
     Boss(float tx, float ty)
     {
-        super(tx, ty); // 부모 클래스(Enemy)의 생성자를 호출해 기본 세팅을 마칩니다.
-        size = 200; // 보스답게 충돌 크기를 200픽셀로 뻥튀기합니다.
-        
-        // 월드 레벨에 따라 체력이 배로 늘어납니다 (1월드=1500, 2월드=3000...)
+        super(tx, ty); 
+        size = 200; 
         maxHp = 1500 * stageManager.worldNum;
         hp = maxHp;
-        currentWeapon = WeaponType.NONE; // 일반 총을 쓰지 않고 고유 패턴만 씁니다.
-        attackRange = 3000.0; // 맵 어디에 있든 공격이 닿습니다.
+        
+        currentWeapon = WeaponType.BOSS_CANNON; 
     }
 
-    // --- 보스 AI 메인 루프 (오버라이딩) ---
     @Override
     void update(Character target)
     {
-        super.update(target); // 기본 적들의 이동/발사 쿨다운 로직을 그대로 실행합니다.
-        patternTimer--;
-        this.attackRange = 3000.0;
+        // Now super.update() will correctly use the 3000.0 range!
+        super.update(target); 
         
-        // 2초마다 공격 패턴을 무작위(0, 1, 2)로 바꿔 플레이어를 압박합니다.
+        patternTimer--;
+        
         if (patternTimer <= 0)
         {
             pattern = BossPattern.values()[(int)random(3)];
             patternTimer = 120; 
         }
 
-        // 수류탄(Grenade) 패턴 시 생성된 폭탄들의 연산을 업데이트합니다.
+        // Grenade update logic remains same
         for (int i = grenades.size() - 1; i >= 0; i--)
         {
             Grenade g = grenades.get(i);
             g.update();
-
-            // 터진(done) 폭탄이 일정 시간이 지나면 메모리(리스트)에서 지워줍니다.
-            if (g.done && g.timer < -20)
-            {
-                grenades.remove(i);
-            }
+            if (g.done && g.timer < -20) grenades.remove(i);
         }
     }
 
