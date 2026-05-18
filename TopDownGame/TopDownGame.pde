@@ -1163,7 +1163,7 @@ class Enemy extends Sprite
         
         // --- [NEW] Dynamic Attack Range based on Weapon Type ---
         // Snipers have a much longer engagement range (800px) compared to others (350px)
-        attackRange = (currentWeapon == WeaponType.SNIPER) ? 800.0 : 350.0;if (currentWeapon == WeaponType.SNIPER) 
+        if (currentWeapon == WeaponType.SNIPER) 
         {
             attackRange = 800.0;
         }
