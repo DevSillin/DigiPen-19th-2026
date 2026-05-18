@@ -311,8 +311,6 @@ void updateAndDrawGameplay()
     {
         textAlign(CENTER, CENTER);
         fill(0, stageManager.titleAlpha * 0.5);
-        textSize(84);
-        text("WORLD " + stageManager.worldNum + " - STAGE " + stageManager.stageNum, width/2 + 4, height/2 + 4);
         
         // Main Text
         fill(255, stageManager.titleAlpha);
@@ -1068,17 +1066,9 @@ class Character extends Sprite
         textAlign(CENTER, TOP);
         
         // 스테이지 정보 표시
-        if (stageManager.stageNum == 4) 
-        { 
-            fill(255, 50, 50); 
-            text("WORLD " + stageManager.worldNum + " - BOSS STAGE", width / 2, 20);
-        }
-        else 
-        { 
-            text("STAGE " + stageManager.worldNum + " - " + stageManager.stageNum, width / 2, 20); 
-            textSize(20); 
-            text("Enemies Left: " + (stageManager.enemiesToSpawn + stageManager.enemiesAlive), width / 2, 60); 
-        }
+        text("STAGE " + stageManager.worldNum + " - " + stageManager.stageNum, width / 2, 20); 
+        textSize(20); 
+        text("Enemies Left: " + (stageManager.enemiesToSpawn + stageManager.enemiesAlive), width / 2, 60); 
 
         // 좌측 상단 플레이어 HP 바 (비율에 맞춰 초록색 게이지가 줄어듦)
         fill(50); rect(20, 20, 200, 25); 
