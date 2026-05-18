@@ -1117,6 +1117,7 @@ class Enemy extends Sprite
 {
     float hp, maxHp = 50, size = 40; 
     int fireCD = 0; // 발사 쿨타임
+    float attackRange;
     WeaponType currentWeapon; // 적이 들고 있는 무기
     
     Enemy(float tx, float ty) 
@@ -1162,7 +1163,7 @@ class Enemy extends Sprite
         
         // --- [NEW] Dynamic Attack Range based on Weapon Type ---
         // Snipers have a much longer engagement range (800px) compared to others (350px)
-        float attackRange = (currentWeapon == WeaponType.SNIPER) ? 800.0 : 350.0;
+        attackRange = (currentWeapon == WeaponType.SNIPER) ? 800.0 : 350.0;
         
         // If out of attack range, move toward the target
         if (d > attackRange) 
@@ -1308,7 +1309,6 @@ class Boss extends Enemy
     BossPattern pattern = BossPattern.CIRCLE; // 현재 실행 중인 보스의 공격 패턴
     int patternTimer = 120; // 2초(120프레임)마다 패턴을 미친 듯이 바꿉니다.
     ArrayList<Grenade> grenades = new ArrayList<Grenade>(); // 3번 패턴용 수류탄 리스트
-    float attackRange;
 
     Boss(float tx, float ty)
     {
@@ -1319,7 +1319,7 @@ class Boss extends Enemy
         maxHp = 1500 * stageManager.worldNum;
         hp = maxHp;
         currentWeapon = WeaponType.NONE; // 일반 총을 쓰지 않고 고유 패턴만 씁니다.
-        this.attackRange = 3000.0; // 맵 어디에 있든 공격이 닿습니다.
+        attackRange = 3000.0; // 맵 어디에 있든 공격이 닿습니다.
     }
 
     // --- 보스 AI 메인 루프 (오버라이딩) ---
@@ -1328,7 +1328,8 @@ class Boss extends Enemy
     {
         super.update(target); // 기본 적들의 이동/발사 쿨다운 로직을 그대로 실행합니다.
         patternTimer--;
-
+        this.attackRange = 3000.0;
+        
         // 2초마다 공격 패턴을 무작위(0, 1, 2)로 바꿔 플레이어를 압박합니다.
         if (patternTimer <= 0)
         {
