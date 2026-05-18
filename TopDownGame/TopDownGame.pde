@@ -87,71 +87,58 @@ float menuH = 1080;
 
 void setup()
 {
-    // P2D 렌더러를 사용하여 1920x1080 FHD 해상도로 게임 창을 설정합니다.
-    // P2D는 하드웨어 가속을 받아 많은 이미지를 렌더링할 때 유리합니다.
+    // 1. 창 크기 및 렌더러 설정 (가장 먼저 실행되어야 함)
     size(1920, 1080, P2D);
-    
-    // --- 1. 이미지 에셋 로드 ---
-    
-    // 맵에 떨어져 있는 무기(아이템) 이미지 로드
+    println("Step 1: Window Initialized");
+
+    // 2. 이미지 에셋 로드
     dropPistol  = loadImage("drop_pistol.png");
     dropAR      = loadImage("drop_ar.png");
     dropShotgun = loadImage("drop_shotgun.png");
     dropSniper  = loadImage("drop_sniper.png");
-    
-    // 캐릭터가 손에 들고 있는 장착 무기 이미지 로드
     equipPistol  = loadImage("equip_pistol.png");
     equipAR      = loadImage("equip_ar.png");
     equipShotgun = loadImage("equip_shotgun.png");
     equipSniper  = loadImage("equip_sniper.png");
-    
-    // 공통 오브젝트 및 배경 타일 이미지 로드
     bulletImg = loadImage("bullet.png");
     obsTileImg = loadImage("obstacle.png");
     bgTileImg = loadImage("bg_tile.png");
-    
-    // 캐릭터, 적, 보스 등 엔티티 이미지 로드
     playerImg = loadImage("player.png");
     enemyImg = loadImage("enemy.png");
     bossImg = loadImage("boss.png");
-    
-    // 마우스 커서를 대체할 커스텀 조준점 이미지 로드
     crosshairImg = loadImage("cross.png");
-    
-    // --- 2. 시스템 및 매니저 초기화 ---
-    
-    // 총알 500개, 파티클(이펙트) 300개를 미리 메모리에 할당해두는 오브젝트 풀링을 초기화합니다.
-    // 런타임 중의 렉을 방지하는 최적화 기법입니다.
+    println("Step 2: Assets Loaded");
+
+    // 3. 매니저 및 플레이어 초기화 (중복 제거됨!)
     bulletManager = new BulletManager(500);
-    particleManager = new ParticleManager(300); 
+    particleManager = new ParticleManager(300);
     
-    // 플레이어 객체를 맵의 중앙에 생성하고 기본 무기(권총)를 쥐어줍니다.
+    // 월드 크기를 먼저 확정 짓고 플레이어 생성
+    worldWidth = 2000; 
+    worldHeight = 2000;
     player = new Character(worldWidth / 2, worldHeight / 2);
-    player.pickUpWeapon(WeaponType.PISTOL); 
+    player.pickUpWeapon(WeaponType.PISTOL);
     
-    // 스테이지 및 적 생성을 관리하는 매니저를 초기화합니다.
     stageManager = new StageManager();
-    
-    // --- 3. 오디오 프로퍼티 초기화 (에셋 매니저 패턴) ---
-    
-    // 총 9개의 효과음을 담을 수 있는 사운드 배열을 할당합니다.
+    println("Step 3: Managers Initialized");
+
+    // 4. 오디오 시스템 초기화
     audioProperties = new SoundFile[9];
-    
-    // 각 고유 ID(상수 인덱스)에 맞춰 효과음 파일을 매핑하여 로드합니다.
-    // 이렇게 하면 다른 클래스에서 숫자로만 쉽게 사운드를 재생할 수 있습니다.
     audioProperties[SFX_PISTOL_SHOT]   = new SoundFile(this, "pistol_shot.wav");
     audioProperties[SFX_PISTOL_RELOAD] = new SoundFile(this, "pistol_reload.wav");
-    
     audioProperties[SFX_AR_SHOT]       = new SoundFile(this, "ar_shot.wav");
     audioProperties[SFX_AR_RELOAD]     = new SoundFile(this, "ar_reload.wav");
-    
     audioProperties[SFX_SG_SHOT]       = new SoundFile(this, "sg_shot.wav");
     audioProperties[SFX_SG_RELOAD]     = new SoundFile(this, "sg_reload.wav");
-    
     audioProperties[SFX_SR_SHOT]       = new SoundFile(this, "sr_shot.wav");
     audioProperties[SFX_SR_RELOAD]     = new SoundFile(this, "sr_reload.wav");
-    
     audioProperties[SFX_EMPTY_CLICK]   = new SoundFile(this, "empty_click.wav");
+    println("Step 4: Audio Initialized");
+
+    // 5. 첫 스테이지 데이터 빌드
+    stageManager.initStage();
+    currentGameState = GameState.TITLE;
+    println("Step 5: Setup Complete. Game Starting...");
 }
 
 void draw()
@@ -637,121 +624,109 @@ void keyPressed() { player.handleInput(key, true); }
 void keyReleased() { player.handleInput(key, false); }
 
 // --- 코어 엔진 클래스 모음 ---
-
+// --- 스테이지 진행 및 스폰 관리자 ---
 class StageManager
 {
-    // 현재 월드, 스테이지 번호, 생성할 적의 수, 살아있는 적의 수, 스폰 쿨타임
     int worldNum = 1, stageNum = 1, enemiesToSpawn, enemiesAlive, spawnCooldown;
 
-    // 스테이지가 넘어갈 때마다 맵과 데이터를 초기화하고 몹을 배치하는 함수
     void initStage()
     {
-        // 1. 이전 스테이지의 잔재(아이템, 적)를 모두 지웁니다.
         drops.clear(); 
         enemies.clear();
-        for (Bullet b : bulletManager.pool) b.isActive = false; // 총알 비활성화 (오브젝트 풀링 유지)
-        for (Particle p : particleManager.pool) p.isActive = false; // 파티클 비활성화
+        obstacles.clear();
+        
+        // 총알 및 파티클 초기화
+        for (Bullet b : bulletManager.pool) b.isActive = false;
+        for (Particle p : particleManager.pool) p.isActive = false;
 
-        // 2. 월드가 높아질수록 맵의 크기를 500픽셀씩 넓힙니다.
         worldWidth = 2000 + (worldNum * 500); 
         worldHeight = 2000 + (worldNum * 500);
-        
-        // 플레이어를 항상 넓어진 맵의 한가운데로 스폰시킵니다.
         player.x = worldWidth / 2; 
         player.y = worldHeight / 2;
         
-        obstacles.clear(); // 장애물 초기화
-        
-        // 3. 보스전(4 스테이지)이 아닐 경우에만 맵에 랜덤하게 장애물을 배치합니다.
+        // --- 장애물 생성 로직 (안전 장치 강화) ---
         if (stageNum != 4)
         {
-            int targetObsCount = 15 + (worldNum * 5); // 월드가 높아질수록 장애물 증가
+            // 장애물 개수 제한 (월드 레벨이 올라도 최대 40개 유지)
+            int targetObsCount = min(40, 15 + (worldNum * 5));
             int attempts = 0;
-            int maxAttempts = 2000; // 무한 루프(렉) 방지용 안전장치
-            float margin = 80.0; // 장애물 사이의 최소 간격 (플레이어가 지나갈 수 있도록)
+            int maxAttempts = 1500; // 시도 횟수 제한
 
-            // 목표 장애물 개수를 채우거나, 최대 시도 횟수를 넘길 때까지 반복 배치
             while (obstacles.size() < targetObsCount && attempts < maxAttempts)
             {
+                attempts++; // 루프 시작하자마자 카운트 증가 (무한 루프 방지 핵심)
+
                 float tw = random(100, 300);
                 float th = random(100, 300);
-                // 맵 밖으로 장애물이 삐져나가지 않도록 스폰 좌표를 제한합니다.
                 float tx = random(200, worldWidth - 200 - tw);
                 float ty = random(200, worldHeight - 200 - th);
                 
                 boolean isOverlapping = false;
                 
-                // 1) 다른 장애물과 너무 가깝게 겹치는지 검사
+                // 1. 기존 장애물과 겹치는지 검사
                 for (Obstacle o : obstacles)
                 {
-                    if (o.intersects(tx, ty, tw, th, margin))
+                    if (o.intersects(tx, ty, tw, th, 80.0))
                     {
                         isOverlapping = true;
                         break;
                     }
                 }
                 
-                // 2) 플레이어가 시작하는 중앙 좌표에 장애물이 생겨서 끼이는 것 방지
-                if (tx - margin < player.x && tx + tw + margin > player.x && ty - margin < player.y && ty + th + margin > player.y)
+                // 2. 플레이어 스폰 지점 주변(중앙) 보호
+                if (dist(tx + tw/2, ty + th/2, worldWidth/2, worldHeight/2) < 400)
                 {
                     isOverlapping = true;
                 }
 
-                // 겹치지 않는 안전한 자리라면 리스트에 추가합니다.
                 if (!isOverlapping)
                 {
                     obstacles.add(new Obstacle(tx, ty, tw, th));
                 }
-                
-                attempts++;
             }
         }
 
-        // 4. 적 스폰 횟수 세팅
         enemiesAlive = 0;
         if (stageNum == 4) 
         { 
-            // 보스 스테이지: 잡몹 스폰을 막고 보스 객체 딱 1마리만 생성합니다.
             enemiesToSpawn = 0; 
             enemies.add(new Boss(worldWidth / 2 + 600, worldHeight / 2)); 
             enemiesAlive = 1; 
         }
         else 
         { 
-            // 일반 스테이지: 월드와 스테이지가 오를수록 적 스폰량이 늘어납니다.
             enemiesToSpawn = 5 + (worldNum * 3) + (stageNum * 2); 
             spawnCooldown = 60; 
         }
     }
 
-    // 매 프레임마다 적을 스폰하거나 스테이지를 넘기는 메인 관리 로직
     void update()
     {
-        // 1. 아직 생성해야 할 적이 남아있을 때
         if (stageNum != 4 && enemiesToSpawn > 0)
         {
             spawnCooldown--;
             if (spawnCooldown <= 0)
             {
-                // 플레이어 주변(반경 900) 아무 곳에서나 원형으로 적을 스폰시킵니다.
                 float a = random(TWO_PI);
                 enemies.add(new Enemy(player.x + cos(a) * 900, player.y + sin(a) * 900));
-                
                 enemiesToSpawn--; 
                 enemiesAlive++; 
-                // 월드가 높아질수록 몹이 더 빨리(자주) 스폰되도록 쿨타임을 줄입니다. 최소 30프레임 방어.
                 spawnCooldown = max(30, 90 - (worldNum * 10)); 
             }
         }
-        // 2. 스폰도 끝났고 화면에 남은 적도 다 잡았을 때 (스테이지 클리어)
         else if (enemiesAlive <= 0 && enemiesToSpawn <= 0)
         {
-            stageNum++;
-            // 4 스테이지를 깼다면 다음 월드 1 스테이지로 넘어갑니다.
-            if (stageNum > 4) { worldNum++; stageNum = 1; }
-            
-            // 게임 상태를 클리어 연출 화면으로 바꿉니다.
-            currentGameState = GameState.STAGE_CLEAR;
+            if (stageNum == 4)
+            {
+                worldNum++; 
+                stageNum = 1; 
+                currentGameState = GameState.STAGE_CLEAR;
+            }
+            else
+            {
+                stageNum++;
+                initStage();
+            }
         }
     }
 }
@@ -759,15 +734,22 @@ class StageManager
 // 모든 움직이는 객체(캐릭터, 적)의 가장 뼈대가 되는 부모 클래스
 class Sprite { float x, y, dx, dy; void update() { x += dx; y += dy; } }
 
+// --- 장애물(벽) 클래스 ---
 class Obstacle
 {
     float x, y, w, h; // 장애물의 좌표와 가로/세로 길이
 
-    Obstacle(float tx, float ty, float tw, float th) { x = tx; y = ty; w = tw; h = th; }
+    Obstacle(float tx, float ty, float tw, float th) 
+    { 
+        x = tx; 
+        y = ty; 
+        w = tw; 
+        h = th; 
+    }
 
     void render() 
     { 
-        // 1. 컬링(Culling): 카메라 화면 밖(안 보이는 곳)에 있는 장애물은 렌더링을 건너뛰어 성능을 높입니다.
+        // 1. 컬링(Culling): 카메라 화면 밖(안 보이는 곳)에 있는 장애물은 렌더링을 생략합니다.
         if (x > camX + width || x + w < camX || y > camY + height || y + h < camY) return;
 
         imageMode(CORNER);
@@ -786,21 +768,33 @@ class Obstacle
                 int srcW = (int)(obsTileImg.width * (drawW / tileSize));
                 int srcH = (int)(obsTileImg.height * (drawH / tileSize));
                 
-                // 이미지 일부만 잘라서 그려주는 Processing 고급 함수 사용
                 image(obsTileImg, x + dx, y + dy, drawW, drawH, 0, 0, srcW, srcH);
             }
         }
         
         // 3. 입체감을 주기 위해 장애물 겉에 어두운 테두리를 한 줄 그어줍니다.
-        noFill(); stroke(50); strokeWeight(2);
+        noFill(); 
+        stroke(50); 
+        strokeWeight(2);
         rect(x, y, w, h);
         strokeWeight(1);
     }
 
-    // 다른 객체와 겹치는지 마진(여유 공간)을 두고 검사하는 함수
+    // --- [복구 완료!] 점(Point) 기반 충돌 검사 ---
+    // 총알(BulletManager)이 벽의 영역(사각형) 안에 들어왔는지 검사할 때 사용됩니다.
+    boolean contains(float px, float py) 
+    { 
+        return (px > x && px < x + w && py > y && py < y + h); 
+    }
+
+    // --- 영역(AABB) 기반 충돌 검사 ---
+    // 스테이지 시작 시, 맵에 장애물을 생성할 때 서로 너무 가깝게 겹치지 않도록 여유 공간(margin)을 두고 검사합니다.
     boolean intersects(float ox, float oy, float ow, float oh, float margin)
     {
-        return (x - margin < ox + ow && x + w + margin > ox && y - margin < oy + oh && y + h + margin > oy);
+        return (x - margin < ox + ow && 
+                x + w + margin > ox && 
+                y - margin < oy + oh && 
+                y + h + margin > oy);
     }
 }
 
