@@ -310,7 +310,6 @@ void updateAndDrawGameplay()
     if (stageManager.titleAlpha > 0)
     {
         textAlign(CENTER, CENTER);
-        // Subtle shadow for better visibility
         fill(0, stageManager.titleAlpha * 0.5);
         textSize(84);
         text("WORLD " + stageManager.worldNum + " - STAGE " + stageManager.stageNum, width/2 + 4, height/2 + 4);
@@ -322,7 +321,6 @@ void updateAndDrawGameplay()
         text(msg, width / 2, height / 2);
     }
 
-    // --- Black Fade Overlay (Always on top) ---
     if (stageManager.transAlpha > 0)
     {
         noStroke();
