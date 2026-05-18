@@ -176,7 +176,6 @@ void draw()
 }
 
 // --- 화면 상태(FSM) 렌더링 함수들 ---
-
 void drawStageClearScreen()
 {
     // 1. 우주 배경을 가장 먼저 그립니다.
@@ -270,33 +269,23 @@ void updateAndDrawGameplay()
 {
     background(180); 
     
-    // 카메라가 플레이어를 부드럽게 따라가도록(Easing) 목표 좌표를 계산합니다.
+    // 카메라 트래킹 로직
     float targetX = player.x - width/2;
     float targetY = player.y - height/2;
     camX += (targetX - camX) * camEasing;
     camY += (targetY - camY) * camEasing;
     
-    // 화면 전체를 카메라 좌표만큼 캔버스를 이동시켜서 캐릭터가 항상 화면 중심에 있는 것처럼 연출합니다.
     pushMatrix();
     translate(-camX, -camY);
     
-    // 1. 맵 타일 그리기
     drawWorldBase();
-    
-    // 2. 스테이지 매니저 로직 업데이트 (적군 스폰 등)
     stageManager.update(); 
     
-    // 3. 맵 내의 장애물(벽) 그리기
-    for (Obstacle o : obstacles) { o.render(); }
-    
-    // 4. 바닥에 떨어져 있는 무기(아이템) 그리기 및 획득 판정
-    // 리스트에서 항목을 삭제할 때는 순서가 꼬이거나 에러가 나지 않도록 반드시 뒤에서부터 거꾸로 반복문을 돕니다.
+    for (Obstacle o : obstacles) o.render();
     for (int i = drops.size()-1; i >= 0; i--)
     {
         WeaponDrop d = drops.get(i);
         d.render();
-        
-        // 플레이어와 아이템의 거리가 40 픽셀 이하로 가까워지면 무기를 획득하고 바닥에서 삭제합니다.
         if (dist(player.x, player.y, d.x, d.y) < 40)
         {
             player.pickUpWeapon(d.weapon);
@@ -304,23 +293,43 @@ void updateAndDrawGameplay()
         }
     }
     
-    // 5. 플레이어 행동 로직 처리 및 화면에 그리기
-    if (isShooting) player.tryAttack(); // 마우스 클릭 중이라면 연사 시도
+    if (isShooting) player.tryAttack();
     player.update();
-    player.checkCollision(obstacles); // 플레이어가 벽을 뚫고 지나가지 못하도록 충돌 검사
+    player.checkCollision(obstacles); 
     player.render();
     
-    // 6. 전투 로직 처리 (총알이 적에게 맞았는지, 적이 플레이어를 때렸는지 데미지 계산)
     handleCombat();
     
-    // 7. 파티클 및 총알 로직 처리 (이동 좌표 업데이트 및 화면 렌더링)
     bulletManager.updateAndRender(worldWidth, worldHeight, obstacles);
-    particleManager.updateAndRender(); // 무기 발사 및 폭발 시 나오는 파티클 효과 렌더링
+    particleManager.updateAndRender();
     
-    popMatrix(); // 캔버스 이동 효과를 여기서 끝냅니다. (이후에 그려지는 요소들은 카메라의 영향을 받지 않고 화면에 고정됩니다)
-    
-    // 8. 플레이어의 UI (체력바, 남은 총알 수 등)는 화면의 고정된 위치에 띄우기 위해 가장 마지막에 그립니다.
+    popMatrix(); // 카메라 해제
     player.renderUI();
+    
+    // --- [NEW] Stage Title UI Overlay ---
+    if (stageManager.titleAlpha > 0)
+    {
+        textAlign(CENTER, CENTER);
+        // Subtle shadow for better visibility
+        fill(0, stageManager.titleAlpha * 0.5);
+        textSize(84);
+        text("WORLD " + stageManager.worldNum + " - STAGE " + stageManager.stageNum, width/2 + 4, height/2 + 4);
+        
+        // Main Text
+        fill(255, stageManager.titleAlpha);
+        textSize(80);
+        String msg = (stageManager.stageNum == 4) ? "FINAL BOSS" : "STAGE " + stageManager.worldNum + "-" + stageManager.stageNum;
+        text(msg, width / 2, height / 2);
+    }
+
+    // --- Black Fade Overlay (Always on top) ---
+    if (stageManager.transAlpha > 0)
+    {
+        noStroke();
+        fill(0, stageManager.transAlpha); 
+        rectMode(CORNER);
+        rect(0, 0, width, height); 
+    }
 }
 
 void drawTitleScreen()
@@ -625,17 +634,35 @@ void keyReleased() { player.handleInput(key, false); }
 
 // --- 코어 엔진 클래스 모음 ---
 // --- 스테이지 진행 및 스폰 관리자 ---
+// --- 스테이지 진행 및 페이드 연출 관리자 ---
 class StageManager
 {
     int worldNum = 1, stageNum = 1, enemiesToSpawn, enemiesAlive, spawnCooldown;
+    
+    // --- Transition & UI Effects ---
+    float transAlpha = 0;          // Black overlay transparency
+    float titleAlpha = 0;          // Stage name text transparency
+    boolean isTransitioning = false;
+    boolean isFadeIn = false;      // Screen brightening phase
+    boolean isTitleEffect = false; // Stage title display phase
+    
+    float fadeSpeed = 5.0;
+    int titleTimer = 0;            // Duration for the text to stay on screen
 
     void initStage()
     {
+        // Start with a black screen and trigger fade-in
+        transAlpha = 255; 
+        titleAlpha = 0;
+        isTransitioning = true;
+        isFadeIn = true; 
+        isTitleEffect = false;
+        titleTimer = 60; // Hold title for 1 second at 60fps
+        
         drops.clear(); 
         enemies.clear();
         obstacles.clear();
         
-        // 총알 및 파티클 초기화
         for (Bullet b : bulletManager.pool) b.isActive = false;
         for (Particle p : particleManager.pool) p.isActive = false;
 
@@ -644,45 +671,20 @@ class StageManager
         player.x = worldWidth / 2; 
         player.y = worldHeight / 2;
         
-        // --- 장애물 생성 로직 (안전 장치 강화) ---
+        // Generate obstacles (Same as before)
         if (stageNum != 4)
         {
-            // 장애물 개수 제한 (월드 레벨이 올라도 최대 40개 유지)
             int targetObsCount = min(40, 15 + (worldNum * 5));
             int attempts = 0;
-            int maxAttempts = 1500; // 시도 횟수 제한
-
-            while (obstacles.size() < targetObsCount && attempts < maxAttempts)
+            while (obstacles.size() < targetObsCount && attempts < 1500)
             {
-                attempts++; // 루프 시작하자마자 카운트 증가 (무한 루프 방지 핵심)
-
-                float tw = random(100, 300);
-                float th = random(100, 300);
-                float tx = random(200, worldWidth - 200 - tw);
-                float ty = random(200, worldHeight - 200 - th);
-                
-                boolean isOverlapping = false;
-                
-                // 1. 기존 장애물과 겹치는지 검사
-                for (Obstacle o : obstacles)
-                {
-                    if (o.intersects(tx, ty, tw, th, 80.0))
-                    {
-                        isOverlapping = true;
-                        break;
-                    }
-                }
-                
-                // 2. 플레이어 스폰 지점 주변(중앙) 보호
-                if (dist(tx + tw/2, ty + th/2, worldWidth/2, worldHeight/2) < 400)
-                {
-                    isOverlapping = true;
-                }
-
-                if (!isOverlapping)
-                {
-                    obstacles.add(new Obstacle(tx, ty, tw, th));
-                }
+                attempts++;
+                float tw = random(100, 300), th = random(100, 300);
+                float tx = random(200, worldWidth - 200 - tw), ty = random(200, worldHeight - 200 - th);
+                boolean overlap = false;
+                for (Obstacle o : obstacles) if (o.intersects(tx, ty, tw, th, 80.0)) overlap = true;
+                if (dist(tx + tw/2, ty + th/2, worldWidth/2, worldHeight/2) < 400) overlap = true;
+                if (!overlap) obstacles.add(new Obstacle(tx, ty, tw, th));
             }
         }
 
@@ -702,30 +704,66 @@ class StageManager
 
     void update()
     {
-        if (stageNum != 4 && enemiesToSpawn > 0)
+        if (!isTransitioning)
         {
-            spawnCooldown--;
-            if (spawnCooldown <= 0)
+            // Standard gameplay logic
+            if (stageNum != 4 && enemiesToSpawn > 0)
             {
-                float a = random(TWO_PI);
-                enemies.add(new Enemy(player.x + cos(a) * 900, player.y + sin(a) * 900));
-                enemiesToSpawn--; 
-                enemiesAlive++; 
-                spawnCooldown = max(30, 90 - (worldNum * 10)); 
+                spawnCooldown--;
+                if (spawnCooldown <= 0)
+                {
+                    float a = random(TWO_PI);
+                    enemies.add(new Enemy(player.x + cos(a) * 900, player.y + sin(a) * 900));
+                    enemiesToSpawn--; enemiesAlive++; 
+                    spawnCooldown = max(30, 90 - (worldNum * 10)); 
+                }
+            }
+            else if (enemiesAlive <= 0 && enemiesToSpawn <= 0)
+            {
+                isTransitioning = true;
+                isFadeIn = false; // Start Fade-out to black
             }
         }
-        else if (enemiesAlive <= 0 && enemiesToSpawn <= 0)
+        else 
         {
-            if (stageNum == 4)
+            // Transition State Machine
+            if (!isFadeIn && !isTitleEffect) // Phase 1: Fade-out to black
             {
-                worldNum++; 
-                stageNum = 1; 
-                currentGameState = GameState.STAGE_CLEAR;
+                transAlpha += fadeSpeed;
+                if (transAlpha >= 255)
+                {
+                    transAlpha = 255;
+                    if (stageNum == 4) { worldNum++; stageNum = 1; currentGameState = GameState.STAGE_CLEAR; }
+                    else { stageNum++; initStage(); }
+                }
             }
-            else
+            else if (isFadeIn) // Phase 2: Fade-in (Brightening screen)
             {
-                stageNum++;
-                initStage();
+                transAlpha -= fadeSpeed;
+                if (transAlpha <= 0)
+                {
+                    transAlpha = 0;
+                    isFadeIn = false;
+                    isTitleEffect = true; // Trigger Phase 3: Show Title
+                }
+            }
+            else if (isTitleEffect) // Phase 3: Stage Title Animation
+            {
+                if (titleTimer > 0) // Title Fading In & Holding
+                {
+                    titleAlpha += fadeSpeed * 2;
+                    if (titleAlpha >= 255) { titleAlpha = 255; titleTimer--; }
+                }
+                else // Title Fading Out
+                {
+                    titleAlpha -= fadeSpeed;
+                    if (titleAlpha <= 0)
+                    {
+                        titleAlpha = 0;
+                        isTitleEffect = false;
+                        isTransitioning = false; // Finally resume gameplay
+                    }
+                }
             }
         }
     }
@@ -1133,16 +1171,20 @@ class Enemy extends Sprite
     // --- 적 AI 메인 루프 ---
     void update(Character target) 
     {
-        float d = dist(x, y, target.x, target.y); // 플레이어와의 거리
-        float a = atan2(target.y - y, target.x - x); // 플레이어를 향하는 각도
+        float d = dist(x, y, target.x, target.y); // Distance to player
+        float a = atan2(target.y - y, target.x - x); // Angle to player
         
-        // 거리가 350보다 멀면 플레이어 쪽으로 다가옵니다.
-        if (d > 350) 
+        // --- [NEW] Dynamic Attack Range based on Weapon Type ---
+        // Snipers have a much longer engagement range (800px) compared to others (350px)
+        float attackRange = (currentWeapon == WeaponType.SNIPER) ? 800.0 : 350.0;
+        
+        // If out of attack range, move toward the target
+        if (d > attackRange) 
         { 
             dx = cos(a) * 2.2;
             dy = sin(a) * 2.2; 
         } 
-        // 350 안으로 들어오면 멈춰 서서 총을 쏘기 시작합니다.
+        // If within attack range, stop and prepare to fire
         else 
         { 
             dx = 0; 
@@ -1150,9 +1192,9 @@ class Enemy extends Sprite
             if(fireCD <= 0) fire(a); 
         } 
         
-        // 이동 연산 (부모 Sprite 클래스)
+        // Apply physics and tick down the cooldown
         super.update();
-        if (fireCD > 0) fireCD--; // 쿨타임 감소
+        if (fireCD > 0) fireCD--; 
     }
     
     // --- 장애물 충돌 검사 (AABB 알고리즘) ---
