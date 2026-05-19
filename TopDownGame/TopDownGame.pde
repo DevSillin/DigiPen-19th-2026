@@ -9,7 +9,7 @@ enum CharacterState { IDLE, MOVE, ROLL, ATTACK, RELOAD } // 대기, 이동, 구�
 enum WeaponType { NONE, PISTOL, ASSAULT_RIFLE, SHOTGUN, SNIPER, BOSS_CANNON } // 맨손, 권총, 돌격소총, 샷건, 저격총
 
 // 보스 몬스터가 사용하는 공격 패턴의 종류입니다.
-enum BossPattern { CIRCLE, RAPID, GRENADE } // 원형 탄막, 고속 기관총, 수류탄 투척
+enum BossPattern { CIRCLE, RAPID, GRENADE, SPIRAL, SHOTGUN_WAVE } // 원형 탄막, 고속 기관총, 수류탄 투척
 
 import processing.sound.*; // 사운드 처리를 위해 Processing Sound 라이브러리를 불러옵니다.
 
@@ -84,6 +84,9 @@ float menuX = 0;
 float menuY = 0;
 float menuW = 450; 
 float menuH = 1080;
+
+float shakeTimer = 0;     
+float shakeMagnitude = 0;
 
 void setup()
 {
@@ -228,16 +231,14 @@ void drawWorldBase()
     float tileSize = 128.0; // 타일 한 칸의 크기입니다.
     
     imageMode(CORNER);
-    background(30); // 맵 타일이 깔리지 않은 바깥 빈 공간은 어두운 회색으로 칠합니다.
+    background(30);
 
-    // 화면 밖의 타일은 그리지 않도록(Culling), 현재 카메라 화면에 보이는 타일의 시작과 끝 인덱스만 계산합니다. (렉 방지를 위한 렌더링 최적화)
-    int startCol = (int)max(0, camX / tileSize);
-    int endCol = (int)min(worldWidth / tileSize, (camX + width) / tileSize + 1);
+    int startCol = (int)floor(camX / tileSize);
+    int endCol = (int)ceil((camX + width) / tileSize);
     
-    int startRow = (int)max(0, camY / tileSize);
-    int endRow = (int)min(worldHeight / tileSize, (camY + height) / tileSize + 1);
+    int startRow = (int)floor(camY / tileSize);
+    int endRow = (int)ceil((camY + height) / tileSize);
 
-    // 계산된 화면 내의 타일 영역만 반복문을 돌며 타일 이미지를 그려줍니다.
     for (int col = startCol; col <= endCol; col++)
     {
         for (int row = startRow; row <= endRow; row++)
@@ -245,7 +246,14 @@ void drawWorldBase()
             float drawX = col * tileSize;
             float drawY = row * tileSize;
             
-            image(bgTileImg, drawX, drawY, tileSize, tileSize);
+            if (drawX >= 0 && drawX < worldWidth && drawY >= 0 && drawY < worldHeight)
+            {
+                image(bgTileImg, drawX, drawY, tileSize, tileSize);
+            }
+            else
+            {
+                image(obsTileImg, drawX, drawY, tileSize, tileSize);
+            }
         }
     }
 }
@@ -263,26 +271,46 @@ void drawGameOverScreen()
     fill(255); textSize(24); text("Click to restart game", width / 2, height / 2 + 50);
 }
 
+void triggerScreenShake(float time, float mag)
+{
+    shakeTimer = time;
+    shakeMagnitude = mag;
+}
+
 // --- 게임 플레이 메인 루프 ---
 
 void updateAndDrawGameplay()
 {
     background(180); 
     
-    // 카메라 트래킹 로직
-    float targetX = player.x - width/2;
-    float targetY = player.y - height/2;
+    // Calculate logical camera tracking with easing
+    float targetX = player.x - width / 2;
+    float targetY = player.y - height / 2;
     camX += (targetX - camX) * camEasing;
     camY += (targetY - camY) * camEasing;
     
+    float renderCamX = camX;
+    float renderCamY = camY;
+    
+    // Apply screen shake offsets
+    if (shakeTimer > 0)
+    {
+        renderCamX += random(-shakeMagnitude, shakeMagnitude);
+        renderCamY += random(-shakeMagnitude, shakeMagnitude);
+        
+        shakeTimer--;
+        shakeMagnitude *= 0.9;
+    }
+    
     pushMatrix();
-    translate(-camX, -camY);
+    translate(-renderCamX, -renderCamY);
     
     drawWorldBase();
     stageManager.update(); 
     
-    for (Obstacle o : obstacles) o.render();
-    for (int i = drops.size()-1; i >= 0; i--)
+    for (Obstacle o : obstacles) { o.render(); }
+    
+    for (int i = drops.size() - 1; i >= 0; i--)
     {
         WeaponDrop d = drops.get(i);
         d.render();
@@ -303,9 +331,11 @@ void updateAndDrawGameplay()
     bulletManager.updateAndRender(worldWidth, worldHeight, obstacles);
     particleManager.updateAndRender();
     
-    popMatrix(); // 카메라 해제
+    popMatrix(); 
+    
     player.renderUI();
     
+    // Render transition overlays
     if (stageManager.titleAlpha > 0)
     {
         textAlign(CENTER, CENTER);
@@ -521,6 +551,7 @@ void handleCombat()
             if (player.currentState != CharacterState.ROLL) 
             {
                 player.hp -= b.damage;
+                triggerScreenShake(10, 12.0);
                 particleManager.spawnSparks(b.x, b.y, color(255, 0, 0)); // 플레이어가 피격당할 때도 붉은 스파크 연출
                 
                 // 체력이 0이 되면 게임 오버 화면으로 상태를 넘깁니다.
@@ -700,22 +731,32 @@ class StageManager
     {
         if (!isTransitioning)
         {
-            // Standard gameplay logic
             if (stageNum != 4 && enemiesToSpawn > 0)
             {
                 spawnCooldown--;
                 if (spawnCooldown <= 0)
                 {
                     float a = random(TWO_PI);
-                    enemies.add(new Enemy(player.x + cos(a) * 900, player.y + sin(a) * 900));
-                    enemiesToSpawn--; enemiesAlive++; 
+                    
+                    // Calculate raw spawn position relative to the player
+                    float spawnX = player.x + cos(a) * 900;
+                    float spawnY = player.y + sin(a) * 900;
+                    
+                    // Clamp coordinates within the inner playable area (leaving 100px padding from the wall)
+                    spawnX = constrain(spawnX, 100, worldWidth - 100);
+                    spawnY = constrain(spawnY, 100, worldHeight - 100);
+                    
+                    enemies.add(new Enemy(spawnX, spawnY));
+                    
+                    enemiesToSpawn--; 
+                    enemiesAlive++; 
                     spawnCooldown = max(30, 90 - (worldNum * 10)); 
                 }
             }
             else if (enemiesAlive <= 0 && enemiesToSpawn <= 0)
             {
                 isTransitioning = true;
-                isFadeIn = false; // Start Fade-out to black
+                isFadeIn = false; 
             }
         }
         else 
@@ -1017,6 +1058,9 @@ class Character extends Sprite
         translate(x, y); // 캐릭터 좌표로 캔버스 원점 이동
         
         // 1. 캐릭터 몸통 렌더링
+        noStroke();
+        fill(0, 100); 
+        ellipse(5, 7, 40, 40);
         pushMatrix();
         rotate(angle); // 마우스 방향으로 캐릭터 몸통 회전
         imageMode(CENTER);
@@ -1277,6 +1321,10 @@ class Enemy extends Sprite
         pushMatrix();
         translate(x, y);
         
+        noStroke();
+        fill(0, 100); 
+        ellipse(5, 7, 40, 40);
+        
         // 1. 적의 몸통 그리기
         pushMatrix();
         rotate(angle); 
@@ -1320,6 +1368,7 @@ class Boss extends Enemy
     BossPattern pattern = BossPattern.CIRCLE; // 현재 실행 중인 보스의 공격 패턴
     int patternTimer = 120; // 2초(120프레임)마다 패턴을 미친 듯이 바꿉니다.
     ArrayList<Grenade> grenades = new ArrayList<Grenade>(); // 3번 패턴용 수류탄 리스트
+    float spiralAngle = 0;
 
     Boss(float tx, float ty)
     {
@@ -1341,7 +1390,7 @@ class Boss extends Enemy
         
         if (patternTimer <= 0)
         {
-            pattern = BossPattern.values()[(int)random(3)];
+            pattern = BossPattern.values()[(int)random(5)];
             patternTimer = 120; 
         }
 
@@ -1361,10 +1410,9 @@ class Boss extends Enemy
     {
         switch (pattern)
         {
-            case CIRCLE: // 1. 원형 탄막 (Bullet Hell)
+            case CIRCLE: // 1. 원형 탄막
             {
-                fireCD = 50; 
-                // 360도를 16조각으로 나눠서 엄청난 크기의 총알 파도를 사방으로 뿜어냅니다.
+                fireCD = 60; 
                 for (int i = 0; i < 16; i++)
                 {
                     float spreadAngle = i * PI / 8;
@@ -1372,19 +1420,41 @@ class Boss extends Enemy
                 }
                 break;
             }
-            case RAPID: // 2. 초고속 기관총 (Minigun)
+            case RAPID: // 2. 미니건
             {
-                fireCD = 4; // 발사 쿨타임 4 (거의 1초에 15발씩 쏩니다)
-                // 살짝 흩어지는 오차를 주면서 플레이어에게 미친 속도로 총알을 난사합니다.
-                float rapidAngle = angle + random(-0.15, 0.15);
+                fireCD = 4; 
+                float rapidAngle = angle + random(-0.2, 0.2); // 오차 범위를 살짝 더 넓힘
                 bulletManager.fireBullet(x, y, cos(rapidAngle) * 12, sin(rapidAngle) * 12, 15, 12, false);
                 break;
             }
-            case GRENADE: // 3. 곡사포/수류탄 투척
+            case GRENADE: // 3. 폭격
             {
-                fireCD = 70; 
-                // 플레이어가 서 있는 현재 위치(x, y)에 수류탄 객체를 던집니다. (터질 때까지 시간이 걸림)
+                fireCD = 60; 
                 grenades.add(new Grenade(x, y, player.x, player.y));
+                break;
+            }
+            case SPIRAL: // 4. [NEW] 회전하는 나선형 탄막 (Bullet Hell)
+            {
+                fireCD = 6; // 발사 속도가 매우 빠름
+                spiralAngle += 0.2; // 쏠 때마다 각도가 살짝 틀어지며 나선형 궤적을 만듦
+                
+                // 4방향으로 빙글빙글 돌면서 총알을 뿌림
+                for(int i = 0; i < 4; i++) 
+                {
+                    float a = spiralAngle + (i * HALF_PI);
+                    bulletManager.fireBullet(x, y, cos(a) * 8, sin(a) * 8, 16, 12, false);
+                }
+                break;
+            }
+            case SHOTGUN_WAVE: // 5. [NEW] 거대 산탄 파도
+            {
+                fireCD = 50; 
+                // 플레이어를 향해 9발의 거대한 총알을 부채꼴로 한꺼번에 발사
+                for(int i = -4; i <= 4; i++) 
+                {
+                    float a = angle + (i * 0.12);
+                    bulletManager.fireBullet(x, y, cos(a) * 9, sin(a) * 9, 18, 15, false);
+                }
                 break;
             }
         }
@@ -1455,13 +1525,18 @@ class Grenade extends Sprite
 
             // 3. 폭발 반경(120 픽셀) 안에 플레이어가 있는지 검사합니다.
             // [중요] 플레이어가 구르기(ROLL) 중일 때는 무적(I-frame) 판정을 받아 데미지를 입지 않습니다!
-            if (dist(x, y, player.x, player.y) < 120 && player.currentState != CharacterState.ROLL)
+            if (dist(x, y, player.x, player.y) < 200 && player.currentState != CharacterState.ROLL)
             {
                 player.hp -= 30; // 뼈아픈 30의 광역 데미지
-
+                triggerScreenShake(30, 25.0);
                 if (player.hp <= 0)
                 {
                     currentGameState = GameState.GAME_OVER;
+                }
+                else 
+                {
+                    // 플레이어가 맞지 않았더라도 폭발의 여파로 화면을 강하게 흔들어줍니다!
+                    triggerScreenShake(20, 15.0);
                 }
             }
         }
@@ -1478,7 +1553,7 @@ class Grenade extends Sprite
             strokeWeight(2);
             
             // 타이머가 줄어들수록 원의 크기도 바깥에서 안쪽으로 쪼그라듭니다.
-            float currentRadius = 240 * (1 - (float)timer / 90.0);
+            float currentRadius = 400 * (1 - (float)timer / 90.0);
             ellipse(tx, ty, currentRadius, currentRadius);
             
             strokeWeight(1);
@@ -1492,7 +1567,7 @@ class Grenade extends Sprite
         {
             fill(255, 100, 0, 150);
             noStroke();
-            ellipse(x, y, 240, 240); // 데미지 반경(120)의 2배(지름) 크기
+            ellipse(x, y, 400, 400); // 데미지 반경(120)의 2배(지름) 크기
         }
     }
 }
